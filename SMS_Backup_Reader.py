@@ -126,7 +126,7 @@ class Reader:
         target = XML_Target()
         # the xml parser:
         parser = XMLParser(target=target)
-        with open(self.filename, "r") as f:
+        with open(self.filename, "r", encoding="utf-8") as f:
             for line in f:
                 corrected_line = regex.sub(repl, line)
                 parser.feed(corrected_line)
@@ -290,8 +290,11 @@ class Application(tk.Frame):
         self.listedt.config(background='gray90')
 
     def save_file_dialog(self):
-        try:
-            with filedialog.asksaveasfile() as f:
+        fname = filedialog.asksaveasfilename()
+        if fname:
+            with open(fname, mode='w', encoding="utf-16") as f:
+                # I am using utf-16 because Windows just won't get utf-8 and
+                # I don't want to write a BOM (with utf-8-sig)
                 selection = self.listedt.curselection()[0]
                 if selection == 0:
                     contact = '__all__'
@@ -308,9 +311,6 @@ class Application(tk.Frame):
                         ["Empfangen", "Gesendet", "Entwurf", "Ausgang", "Fehler", "Queue"][sms.stype - 1])
                     f.write(' ' + sms.readable_date + ', ' + contact + ':\n')
                     f.write(sms.body + '\n\n')
-        except AttributeError:
-            #user canceled
-            pass
 
     def srcfile_edt_return(self, event):
         if not self.srcfile_edt.get():
