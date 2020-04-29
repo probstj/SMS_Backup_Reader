@@ -187,6 +187,11 @@ class Application(tk.Frame):
 
         # text
         frame = tk.Frame(mainframe)
+        self.savebtn = tk.Button(
+            frame, text="Speichern",
+            command=self.save_file_dialog, state=tk.DISABLED)
+        self.savebtn.pack(
+                side=tk.BOTTOM, fill=tk.BOTH)
         scrollbar = tk.Scrollbar(frame, orient=tk.VERTICAL)
         self.textedt = tk.Text(
             frame,
@@ -254,7 +259,8 @@ class Application(tk.Frame):
                     ["Empfangen", "Gesendet", "Entwurf", "Ausgang", "Fehler", "Queue"][sms.stype - 1],
                     (tag, 'grayed'))
 
-            if contact == "__all__":
+            if selection == 0:
+                # selected all contacts
                 if sms.contact_name == '(Unknown)':
                     contact = sms.address
                 else:
@@ -265,6 +271,7 @@ class Application(tk.Frame):
             self.textedt.insert(tk.END, '\n')
 
         self.textedt.config(state=tk.DISABLED)
+        self.savebtn.config(state=tk.NORMAL)
 
 
     def open_file_dialog(self):
@@ -281,6 +288,29 @@ class Application(tk.Frame):
         self.listedt.insert(0, 'Alle')
         self.listedt.insert(tk.END, *self.reader.get_contacts_list())
         self.listedt.config(background='gray90')
+
+    def save_file_dialog(self):
+        try:
+            with filedialog.asksaveasfile() as f:
+                selection = self.listedt.curselection()[0]
+                if selection == 0:
+                    contact = '__all__'
+                else:
+                    contact = self.reader.get_contacts_list()[selection - 1]
+                for sms in self.reader.get_sms_list(contact):
+                    if selection == 0:
+                        # selected all contacts
+                        if sms.contact_name == '(Unknown)':
+                            contact = sms.address
+                        else:
+                            contact = sms.contact_name
+                    f.write(
+                        ["Empfangen", "Gesendet", "Entwurf", "Ausgang", "Fehler", "Queue"][sms.stype - 1])
+                    f.write(' ' + sms.readable_date + ', ' + contact + ':\n')
+                    f.write(sms.body + '\n\n')
+        except AttributeError:
+            #user canceled
+            pass
 
     def srcfile_edt_return(self, event):
         if not self.srcfile_edt.get():
@@ -304,5 +334,5 @@ if __name__ == "__main__":
     # set window title
     root.wm_title("SMS Backup Reader")
     root.geometry("640x600")
-    app.srcfile_edt.insert(0, 'sms_example.xml') #TODO remove
+    #app.srcfile_edt.insert(0, 'sms_example.xml') #TODO remove
     app.mainloop()
