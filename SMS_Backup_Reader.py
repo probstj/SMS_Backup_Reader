@@ -199,14 +199,13 @@ class Application(tk.Frame):
         mainframe.add(frame)
 
     def select_contact(self, event):
-        self.textedt.config(background='gray90')
         selection = self.listedt.curselection()[0]
         if selection == 0:
             contact = '__all__'
         else:
             contact = self.reader.get_contacts_list()[selection - 1]
 
-        self.textedt.config(state=tk.NORMAL)
+        self.textedt.config(state=tk.NORMAL, background='gray90')
         self.textedt.delete(1.0, tk.END)
         self.textedt.tag_config(
             "received", background="light blue", lmargin1=40, lmargin2=40,
@@ -257,17 +256,15 @@ class Application(tk.Frame):
 
             if contact == "__all__":
                 if sms.contact_name == '(Unknown)':
-                    contact2 = sms.address
+                    contact = sms.address
                 else:
-                    contact2 = sms.contact_name
+                    contact = sms.contact_name
 
             self.textedt.insert(
-                tk.END, ': ' + sms.readable_date + ', ' + contact2 + '\n', (tag, 'grayed'))
+                tk.END, ': ' + sms.readable_date + ', ' + contact + '\n', (tag, 'grayed'))
             self.textedt.insert(tk.END, '\n')
 
         self.textedt.config(state=tk.DISABLED)
-
-
 
 
     def open_file_dialog(self):
