@@ -6,12 +6,12 @@ Created on Sun Apr 12 10:09:11 2020
 @author: Jürgen Probst
 """
 
-import sys, re
+import os, sys, re, base64, time #, io
 import tkinter as tk
 from tkinter import filedialog
 from xml.etree.ElementTree import XMLParser
-from collections import namedtuple
-#from PIL import ImageTk, Image
+#from collections import namedtuple
+from PIL import ImageTk
 
 """
 https://stackoverflow.com/questions/7693515/why-is-elementtree-raising-a-parseerror#7693834
@@ -40,18 +40,239 @@ https://docs.python.org/3/library/xml.etree.elementtree.html#xmlparser-objects
 
 """
 
-#TODO
+#plan:
 # - read file line by line - ok
 # - correct line on the fly - ok
-# - sent/serve corrected line to xml-parser (SAX or iterparse style)
+# - sent/serve corrected line to xml-parser (SAX or iterparse style) ok
 # - event is e.g. a <sms>, create a namedtuple for each entry with all data
 # - make dict: add namedtuple, keys are conversation partner, items are lists of smss
 # - also need list of conversation partners? (or use keys of dict?)
 # - another list of all smss, sorted by date (or have a special entry 'all' in dict?)
 
-SMSDataSet = namedtuple('SMSDataSet',
-    "address date stype body read status date_sent "
-    "readable_date contact_name")
+
+class Message:
+    def __init__(self, attrib):
+        """Creates an SMS message data set. *attrib* is the attribute dict
+        returned by the xml reader.
+
+        """
+
+        # from here: https://synctech.com.au/sms-backup-restore/fields-in-xml-backup-files/
+        #
+        #    protocol - Protocol used by the message, its mostly 0 in case of SMS messages.
+        #    address - The phone number of the sender/recipient.
+        #    date - The Java date representation (including millisecond) of the time when the message was sent/received. Check out www.epochconverter.com for information on how to do the conversion from other languages to Java.
+        #    type - 1 = Received, 2 = Sent, 3 = Draft, 4 = Outbox, 5 = Failed, 6 = Queued
+        #    subject - Subject of the message, its always null in case of SMS messages.
+        #    body - The content of the message.
+        #    toa - n/a, defaults to null.
+        #    sc_toa - n/a, defaults to null.
+        #    service_center - The service center for the received message, null in case of sent messages.
+        #    read - Read Message = 1, Unread Message = 0.
+        #    status - None = -1, Complete = 0, Pending = 32, Failed = 64.
+        #    readable_date - Optional field that has the date in a human readable format.
+        #    contact_name - Optional field that has the name of the contact.
+        #    All the field values are read as is from the underlying database and no conversion is done by the app in most cases.
+        self._address = attrib["address"]
+        self._date = attrib["date"]
+        self._stype = int(attrib["type"])
+        self._text = attrib["body"]
+        self._readable_date = attrib.get(
+                "readable_date",
+                time.strftime(
+                        '%d.%m.%Y %H:%M:%S',
+                        time.localtime(float(self._date) / 1000)))
+        self._contact_name = attrib["contact_name"]
+
+        self.contact = self._contact_name
+        if self.contact == '(Unknown)':
+            self.contact = self._address
+
+    def is_received(self):
+        """message was received"""
+        return self._stype == 1
+
+    def is_sent(self):
+        """message was sent"""
+        return self._stype == 2
+
+    def is_neither_sent_nor_received(self):
+        """message is a draft, outbox, failed or queued."""
+        return self._stype != 1 and self._stype != 2
+
+    def get_type_text(self):
+        return [
+            "Empfangen", "Gesendet", "Entwurf",
+            "Ausgang", "Fehler", "Queue"][self._stype - 1]
+
+    def get_contact(self):
+        return self.contact
+
+    def get_address(self):
+        return self._address
+
+    def get_date(self):
+        return self._readable_date
+
+    def get_text(self):
+        return self._text
+
+    def has_data(self):
+        return False
+
+    def has_multi_addresses(self):
+        return False
+
+class MMS(Message):
+    def __init__(self, attrib):
+        """Creates an MMS message data set. *attrib* is the attribute dict
+        returned by the xml reader. parts and addrs must be added with
+        the appropiate methods.
+
+        """
+
+        # from here: https://synctech.com.au/sms-backup-restore/fields-in-xml-backup-files/
+        #
+        # An MMS message comprises of a few different elements with a structure like this:
+        # <mms>
+        #    <parts>
+        #       <part/>
+        #       <part/>
+        #   </parts>
+        #   <addrs>
+        #       <addr/>
+        #       <addr/>
+        #   </addr>
+        # </mms>
+        #
+        # The mms element contains most of the metadata about the message like the phone numbers, date/time etc.
+        # The part elements contain the actual content of the message like a photo or video or the text message.
+        # The addr elements contain the list of recipients of the messages in case of group messages.
+        # The actual attributes in the elements vary depending on the phone but here are some of the common attributes:
+        #     mms
+        #         date - The Java date representation (including millisecond) of the time when the message was sent/received. Check out www.epochconverter.com for information on how to do the conversion from other languages to Java.
+        #         ct_t - The Content-Type of the message, usually "application/vnd.wap.multipart.related"
+        #         msg_box - The type of message, 1 = Received, 2 = Sent, 3 = Draft, 4 = Outbox
+        #         rr - The read-report of the message.
+        #         sub - The subject of the message, if present.
+        #         read_status - The read-status of the message.
+        #         address - The phone number of the sender/recipient.
+        #         m_id - The Message-ID of the message
+        #         read - Has the message been read
+        #         m_size - The size of the message.
+        #         m_type - The type of the message defined by MMS spec.
+        #         readable_date - Optional field that has the date in a human readable format.
+        #         contact_name - Optional field that has the name of the contact.
+        #     part
+        #         seq - The order of the part.
+        #         ct - The content type of the part.
+        #         name - The name of the part.
+        #         chset - The charset of the part.
+        #         cl - The content location of the part.
+        #         text - The text content of the part.
+        #         data - The base64 encoded binary content of the part.
+        #     addr
+        #         address - The phone number of the sender/recipient.
+        #         type - The type of address, 129 = BCC, 130 = CC, 151 = To, 137 = From
+        #         charset - Character set of this entry
+        self._address = attrib["address"]
+        self._date = attrib["date"]
+        self._stype = int(attrib["msg_box"])
+        self._readable_date = attrib.get(
+                "readable_date",
+                time.strftime(
+                        '%d.%m.%Y %H:%M:%S',
+                        time.localtime(float(self._date) / 1000)))
+        self._contact_name = attrib["contact_name"]
+        self._text = '' # can be updated later if parts contain text
+        self._parts = []
+        self._addrs = []
+        self._num_data_blocks = 0
+        self._num_text_blocks = 0
+
+        self.contact = self._contact_name
+        if self.contact == '(Unknown)':
+            self.contact = self._address
+
+    # DONE with parts:
+    # if ct is application/smil, just skip it (hope this is not too risky to miss something important)
+    # if ct is text/plain, add the text as message
+    # otherwise, if there is text != 'null', same as above. (should maybe never be, but who knows, I don't want something to fall under the table)
+    #    also otherwise, if there is data, save it as base64bytes for later
+    #    also save 'name' field, could be file name.
+    #    also save content type, because if image we can show it later
+    #       Put these three together as dict in a list
+    #
+    # Then later, when message is shown:
+    # Show all parts, i.e.
+    #    all texts if any
+    #    and all images (we know it from content type)
+    #    and note when there were other files with filename. Say the file can be created when messages are saved
+    #      maybe allow saving this file if clicked on file name?
+    #      For these files, create a filename including date and contact
+
+    def add_part(self, attrib):
+        content_type = attrib["ct"]
+        if content_type == "application/smil":
+            # ignore this for now. Is attached as kind of header to every mms data:
+            return
+        elif content_type == "text/plain":
+            if not self._text:
+                self._text = attrib["text"]
+            else:
+                # there is already some text, add the new text
+                # after some newlines:
+                self._text = "\n\n".join([self._text, attrib["text"]])
+        else:
+            if "text" in attrib and attrib["text"] != "null":
+                # some other kind of text which is not 'text/plain'
+                if not self._text:
+                    self._text = attrib["text"]
+                else:
+                    # there is already some text, add the new text
+                    # after some newlines:
+                    self._text = "\n\n".join([self._text, attrib["text"]])
+            if "data" in attrib and attrib["data"] != "null":
+                filename = attrib["name"]
+                timestr = time.strftime(
+                        "_%Y-%m-%d_%H-%M-%S",
+                        time.localtime(float(self._date) / 1000))
+                if filename == 'null':
+                    # no filename given
+                    # very hackish: just take 'jpeg' part of e.g. 'image/jpeg':
+                    ext = content_type.partition('/')[2]
+                    # build filename from contact and time:
+                    filename = ''.join(
+                        ["MMS_", self.contact, timestr, '.', ext])
+                else:
+                    # Add contact name and time to filename, to make it unique:
+                    filename = ''.join(
+                        ["MMS_", self.contact, timestr, '_', filename])
+                base64bytes = attrib["data"].encode()
+                self._parts.append({
+                        'data': base64bytes,
+                        'name': filename,
+                        'ctype': content_type})
+
+    # TODO with addrs:
+    # if there are multiple senders, print them
+    # (if only one, assume it is the same as contact and ignore)
+    # if there are multiple recepients, print them
+    # (if only one, assume it is the same as receiver and ignore)
+    def add_addr(self, attrib):
+        self._addrs.append(attrib)
+
+    def has_data(self):
+        return bool(self._parts)
+
+    def has_multi_addresses(self):
+        return bool(self._addrs)
+
+    def get_data(self):
+        return self._parts
+
+    def get_recipients(self):
+        return self._addrs
 
 class XML_Target:
     """The target class for the xml parser.
@@ -66,30 +287,39 @@ class XML_Target:
     def start(self, tag, attrib):
         """Called for each opening tag."""
         if tag == 'sms':
-            key = attrib["contact_name"]
-            if key == '(Unknown)':
-                key = attrib["address"]
-            data = SMSDataSet(
-                address = attrib["address"],
-                date = attrib["date"],
-                stype = int(attrib["type"]),
-                body = attrib["body"],
-                read = int(attrib["read"]),
-                status = int(attrib["status"]),
-                date_sent = attrib["date_sent"],
-                readable_date = attrib["readable_date"],
-                contact_name = attrib["contact_name"])
+            data = Message(attrib)
+            key = data.get_contact()
             if not key in self._data:
                 self._data[key] = []
             self._data[key].append(data)
             self._data['__all__'].append(data)
+        elif tag == 'mms':
+            key = attrib["contact_name"]
+            if key == '(Unknown)':
+                key = attrib["address"]
+            data = MMS(attrib)
+            key = data.get_contact()
+            if not key in self._data:
+                self._data[key] = []
+            self._data[key].append(data)
+            self._data['__all__'].append(data)
+        elif tag == "part":
+            self._data['__all__'][-1].add_part(attrib)
+        elif tag == "addr":
+            self._data['__all__'][-1].add_addr(attrib)
+        elif tag == 'parts' or tag == 'addrs':
+            if attrib:
+                print(tag, attrib, "should actually be empty")
         else:
             # at least print the unprocessed tags:
             print(tag, attrib)
 
     def end(self, tag):
         """Called for each closing tag. """
-        pass
+        if tag == 'mms':
+            # create new pointers pointing to empty lists:
+            self._last_parts = []
+            self._last_addrs = []
 
     def data(self, data):
         """Called for each encountered text data."""
@@ -106,7 +336,7 @@ class Reader:
 
         """
         self.filename = filename
-        self.sms = {}
+        self.messages = {}
         self.contacts = []
 
         # regex to find and filter surrogate-coded UTF-16 emojis:
@@ -131,15 +361,21 @@ class Reader:
                 corrected_line = regex.sub(repl, line)
                 parser.feed(corrected_line)
 
-        self.sms = parser.close()
-        self.contacts = sorted(self.sms.keys())
+        self.messages = parser.close()
+        # sort by date. This is neccessary because mms items always come
+        # after the sms items in the xml:
+        for key, msglist in self.messages.items():
+            self.messages[key] = sorted(
+                    msglist, key=lambda s: s._date)
+        self.contacts = sorted(
+            self.messages.keys(), key=lambda s: s.casefold())
         self.contacts.remove('__all__')
 
-    def get_all_sms(self):
-        return self.sms['__all__']
+    def get_all_messages(self):
+        return self.messages['__all__']
 
-    def get_sms_list(self, contact):
-        return self.sms[contact]
+    def get_message_list(self, contact):
+        return self.messages[contact]
 
     def get_contacts_list(self):
         return self.contacts
@@ -193,15 +429,54 @@ class Application(tk.Frame):
         self.savebtn.pack(
                 side=tk.BOTTOM, fill=tk.BOTH)
         scrollbar = tk.Scrollbar(frame, orient=tk.VERTICAL)
+        scrollbar2 = tk.Scrollbar(frame, orient=tk.HORIZONTAL)
         self.textedt = tk.Text(
             frame,
             wrap=tk.WORD,
             yscrollcommand=scrollbar.set,
+            xscrollcommand=scrollbar2.set,
             background='gray80')
         scrollbar.config(command=self.textedt.yview)
+        scrollbar2.config(command=self.textedt.xview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        scrollbar2.pack(side=tk.BOTTOM, fill=tk.X)
         self.textedt.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
         mainframe.add(frame)
+
+    def insert_text_to_textedit(self, text, tag):
+        """Adds text to tkinter Text. If 'text' contains unallowed signs,
+        like emojis, replace them with replacement sign.
+
+        """
+        try:
+            self.textedt.insert(tk.END, '\n' + text + '\n\n', tag)
+        except tk.TclError:
+            pieces = ['\n']
+            copied = 0
+            for i in range(len(text)):
+                if ord(text[i]) >= 0x10000:
+                    if i > copied:
+                        pieces.append(text[copied:i])
+                    pieces.append(chr(0xFFFD)) # replacement sign
+                    copied = i + 1
+            pieces.append(text[copied:])
+            pieces.append('\n\n')
+            self.textedt.insert(tk.END, "".join(pieces), tag)
+
+    def show_hand_cursor(self, event):
+        self.textedt.config(cursor="hand2")
+
+    def hide_hand_cursor(self, event):
+        self.textedt.config(cursor='xterm')
+
+    def get_saveas_event(self, filename, data):
+        def save_as(event):
+            fname = filedialog.asksaveasfilename(initialfile=filename)
+            if fname:
+                with open(fname, mode='wb') as f:
+                    f.write(base64.decodebytes(data))
+                print("saved MMS content as '%s'" % fname)
+        return save_as
 
     def select_contact(self, event):
         selection = self.listedt.curselection()[0]
@@ -213,17 +488,24 @@ class Application(tk.Frame):
         self.textedt.config(state=tk.NORMAL, background='gray90')
         self.textedt.delete(1.0, tk.END)
         self.textedt.tag_config(
-            "received", background="light blue", lmargin1=40, lmargin2=40,
+            "received", background="light blue", rmargin=40,
+            justify=tk.LEFT)
+        self.textedt.tag_config(
+            "sent", background="pale green", lmargin1=40, lmargin2=40,
             justify=tk.RIGHT)
         self.textedt.tag_config(
-            "sent", background="pale green", rmargin=40,
-            justify=tk.LEFT)
-        self.textedt.tag_config(
-            "other", background="light pink", rmargin=40,
-            justify=tk.LEFT)
+            "other", background="light pink", lmargin1=40, lmargin2=40,
+            justify=tk.RIGHT)
         self.textedt.tag_config(
             "grayed",
             foreground='gray', offset=10)
+        self.textedt.tag_config(
+            "link", underline=1)
+        self.textedt.tag_bind(
+            "link", "<Enter>", self.show_hand_cursor)
+        self.textedt.tag_bind(
+            "link", "<Leave>", self.hide_hand_cursor)
+
         self.textedt.insert(tk.END, contact + '\n\n')
 
         #img = tk.PhotoImage(file="emoji.png").subsample(2)
@@ -232,42 +514,67 @@ class Application(tk.Frame):
         # store a reference to prevent it being garbage-collected:
         #self.textedt.img = img
 
-        for sms in self.reader.get_sms_list(contact):
-            #type: 1 = Received, 2 = Sent, 3 = Draft, 4 = Outbox, 5 = Failed, 6 = Queued
-            if sms.stype == 1:
+        # clear previous images:
+        self._current_images = []
+
+        for i, message in enumerate(self.reader.get_message_list(contact)):
+            if message.is_received():
                 tag = "received"
-            elif sms.stype == 2:
+            elif message.is_sent():
                 tag = "sent"
             else:
                 tag = "other"
-            try:
-                self.textedt.insert(tk.END, '\n' + sms.body + '\n\n', tag)
-            except tk.TclError:
-                pieces = ['\n']
-                copied = 0
-                for i in range(len(sms.body)):
-                    if ord(sms.body[i]) >= 0x10000:
-                        if i > copied:
-                            pieces.append(sms.body[copied:i])
-                        pieces.append(chr(0xFFFD)) # replacement sign
-                        copied = i + 1
-                pieces.append(sms.body[copied:])
-                pieces.append('\n\n')
-                self.textedt.insert(tk.END, "".join(pieces), tag)
+            text = message.get_text()
+            if text:
+                self.insert_text_to_textedit(text, tag)
+            if message.has_data():
+                data = message.get_data()
+                self.textedt.imgs = []
+                for d in data:
+                    if d['ctype'].startswith('image/'):
 
-            self.textedt.insert(tk.END,
-                    ["Empfangen", "Gesendet", "Entwurf", "Ausgang", "Fehler", "Queue"][sms.stype - 1],
-                    (tag, 'grayed'))
+                        #iob = io.BytesIO(base64.decodebytes(d['data']))
+                        #img = ImageTk.PhotoImage(Image.open(iob))
+                        img = ImageTk.PhotoImage(data=base64.decodebytes(d['data']))
 
-            if selection == 0:
-                # selected all contacts
-                if sms.contact_name == '(Unknown)':
-                    contact = sms.address
-                else:
-                    contact = sms.contact_name
+                        #print(img.width(), img.height(), d['name'], d['ctype'])
+                        # TODO: if image is too big (bigger than what?),
+                        # decrease image size?
+
+                        self.textedt.insert(tk.END, '\n', tag)
+                        self.textedt.image_create(tk.END, image=img)
+
+                        # use unique tagname:
+                        self.textedt.tag_bind(
+                            "link%i" % i, "<Button-1>",
+                            self.get_saveas_event(d['name'], d['data']))
+                        self.textedt.tag_add("link", 'end-1l', 'end')
+                        self.textedt.tag_add("link%i" % i, 'end-1l', 'end')
+
+                        # store a reference to prevent it being garbage-collected:
+                        self._current_images.append(img)
+                        # this tag will be written over the image:
+                        self.textedt.insert(tk.END, '\n\n', tag)
+                    else:
+                        #print(d['ctype'])
+                        # use unique tagname:
+                        self.textedt.tag_bind(
+                            "link%i" % i, "<Button-1>",
+                            self.get_saveas_event(d['name'], d['data']))
+                        self.textedt.insert(tk.END, '\nAnhang: ', tag)
+                        self.textedt.insert(
+                            tk.END, d['name'] + '\n\n',
+                            (tag, "link", "link%i" % i))
+
+
+            #if message.has_multi_addresses():
+            #    print('todo')
 
             self.textedt.insert(
-                tk.END, ': ' + sms.readable_date + ', ' + contact + '\n', (tag, 'grayed'))
+                tk.END, message.get_type_text(), (tag, 'grayed'))
+
+            self.textedt.insert(
+                tk.END, ': ' + message.get_date() + ', ' + message.get_contact() + '\n', (tag, 'grayed'))
             self.textedt.insert(tk.END, '\n')
 
         self.textedt.config(state=tk.DISABLED)
@@ -290,8 +597,18 @@ class Application(tk.Frame):
         self.listedt.config(background='gray90')
 
     def save_file_dialog(self):
-        fname = filedialog.asksaveasfilename()
+        fname = filedialog.asksaveasfilename(
+            defaultextension='.txt',
+            filetypes=[('Text', '*.txt'), ('Alle Dateien', '*.*')])
         if fname:
+            # folder name in case there are attachments to be saved:
+            foldername = os.path.splitext(fname)[0] + "_MMS_attachments"
+            if os.path.exists(foldername):
+                i = 1
+                while os.path.exists("%s_%02i" % (foldername, i)):
+                    i += 1
+                foldername = "%s_%02i" % (foldername, i)
+            folder_created = False
             with open(fname, mode='w', encoding="utf-16") as f:
                 # I am using utf-16 because Windows just won't get utf-8 and
                 # I don't want to write a BOM (with utf-8-sig)
@@ -300,17 +617,26 @@ class Application(tk.Frame):
                     contact = '__all__'
                 else:
                     contact = self.reader.get_contacts_list()[selection - 1]
-                for sms in self.reader.get_sms_list(contact):
-                    if selection == 0:
-                        # selected all contacts
-                        if sms.contact_name == '(Unknown)':
-                            contact = sms.address
-                        else:
-                            contact = sms.contact_name
-                    f.write(
-                        ["Empfangen", "Gesendet", "Entwurf", "Ausgang", "Fehler", "Queue"][sms.stype - 1])
-                    f.write(' ' + sms.readable_date + ', ' + contact + ':\n')
-                    f.write(sms.body + '\n\n')
+                for message in self.reader.get_message_list(contact):
+                    f.write(message.get_type_text())
+                    f.write(' ' + message.get_date() + ', ')
+                    f.write(message.get_contact() + ':\n')
+                    f.write(message.get_text())
+                    if message.has_data():
+                        data = message.get_data()
+                        for d in data:
+                            f.write(
+                                "\n+Anhang (%s): %s" % (d["ctype"], d["name"]))
+                            if not folder_created:
+                                os.mkdir(foldername)
+                                folder_created = True
+                            afname = os.path.join(foldername, d["name"])
+                            with open(afname, mode='wb') as af:
+                                af.write(base64.decodebytes(d["data"]))
+                            print("saved MMS content as '%s'" % afname)
+                    f.write('\n\n')
+                print("saved all messages of selected contact to '%s'" % fname)
+
 
     def srcfile_edt_return(self, event):
         if not self.srcfile_edt.get():
@@ -320,14 +646,6 @@ class Application(tk.Frame):
             self.open_file()
 
 
-def main(argv=sys.argv[1:]):
-    if len(argv) < 1:
-        print("Bitte Dateinamen angeben beim Starten.")
-        return
-    filename = argv[0]
-    print("Öffne Datei %s" % filename)
-
-
 if __name__ == "__main__":
     root = tk.Tk()
     app = Application(master=root)
@@ -335,4 +653,5 @@ if __name__ == "__main__":
     root.wm_title("SMS Backup Reader")
     root.geometry("640x600")
     #app.srcfile_edt.insert(0, 'sms_example.xml') #TODO remove
+    #app.srcfile_edt.insert(0, 'Beispielmms.xml') #TODO remove
     app.mainloop()
