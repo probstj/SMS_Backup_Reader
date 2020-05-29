@@ -6,12 +6,15 @@ Created on Sun Apr 12 10:09:11 2020
 @author: Jürgen Probst
 """
 
-import os, sys, re, base64, time #, io
+import os, re, base64, time #, io
 import tkinter as tk
 from tkinter import filedialog
 from xml.etree.ElementTree import XMLParser
-#from collections import namedtuple
-from PIL import ImageTk
+
+try:
+    from PIL import ImageTk
+except ModuleNotFoundError:
+    ImageTk = False
 
 """
 https://stackoverflow.com/questions/7693515/why-is-elementtree-raising-a-parseerror#7693834
@@ -287,6 +290,7 @@ class XML_Target:
     def start(self, tag, attrib):
         """Called for each opening tag."""
         if tag == 'sms':
+            return #TODO remove urgently!
             data = Message(attrib)
             key = data.get_contact()
             if not key in self._data:
@@ -531,7 +535,7 @@ class Application(tk.Frame):
                 data = message.get_data()
                 self.textedt.imgs = []
                 for d in data:
-                    if d['ctype'].startswith('image/'):
+                    if d['ctype'].startswith('image/') and ImageTk:
 
                         #iob = io.BytesIO(base64.decodebytes(d['data']))
                         #img = ImageTk.PhotoImage(Image.open(iob))
