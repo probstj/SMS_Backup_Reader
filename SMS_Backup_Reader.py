@@ -127,6 +127,12 @@ class Message:
         return False
 
 class MMS(Message):
+    address_types={
+            129 : "BCC",
+            130 : "CC",
+            151 : "To",
+            137 : "From"}
+
     def __init__(self, attrib):
         """Creates an MMS message data set. *attrib* is the attribute dict
         returned by the xml reader. parts and addrs must be added with
@@ -263,18 +269,19 @@ class MMS(Message):
     # if there are multiple recepients, print them
     # (if only one, assume it is the same as receiver and ignore)
     def add_addr(self, attrib):
-        self._addrs.append(attrib)
+        self._addrs.append(
+            (attrib['address'], self.address_types[int(attrib['type'])]))
 
     def has_data(self):
         return bool(self._parts)
 
     def has_multi_addresses(self):
-        return bool(self._addrs)
+        return len(self._addrs) > 2
 
     def get_data(self):
         return self._parts
 
-    def get_recipients(self):
+    def get_addresses(self):
         return self._addrs
 
 class XML_Target:
@@ -290,7 +297,6 @@ class XML_Target:
     def start(self, tag, attrib):
         """Called for each opening tag."""
         if tag == 'sms':
-            return #TODO remove urgently!
             data = Message(attrib)
             key = data.get_contact()
             if not key in self._data:
@@ -502,7 +508,9 @@ class Application(tk.Frame):
             justify=tk.RIGHT)
         self.textedt.tag_config(
             "grayed",
-            foreground='gray', offset=10)
+            foreground='gray')
+        self.textedt.tag_config(
+            "offset", offset=10) # extra spacing below text
         self.textedt.tag_config(
             "link", underline=1)
         self.textedt.tag_bind(
@@ -510,7 +518,13 @@ class Application(tk.Frame):
         self.textedt.tag_bind(
             "link", "<Leave>", self.hide_hand_cursor)
 
-        self.textedt.insert(tk.END, contact + '\n\n')
+        if contact != '__all__':
+            first = self.reader.get_message_list(contact)[0]
+            if first._contact_name == '(Unknown)':
+                self.textedt.insert(tk.END, '%s\n\n' % (contact, ))
+            else:
+                self.textedt.insert(
+                    tk.END, '%s (%s)\n\n' % (contact, first._address))
 
         #img = tk.PhotoImage(file="emoji.png").subsample(2)
         #img = ImageTk.PhotoImage(Image.open('emoji.png'))
@@ -570,15 +584,24 @@ class Application(tk.Frame):
                             tk.END, d['name'] + '\n\n',
                             (tag, "link", "link%i" % i))
 
-
-            #if message.has_multi_addresses():
-            #    print('todo')
+            if message.has_multi_addresses():
+                self.textedt.insert(
+                    tk.END, "Mehrere Adressen:\n", (tag, 'grayed'))
+                self.textedt.insert(
+                    tk.END,
+                    "\n".join(
+                        ["%s (%s)" % (a[0], a[1])
+                            for a in message.get_addresses()]),
+                    (tag, 'grayed'))
+                self.textedt.insert(
+                tk.END, '\n', (tag, 'grayed',))
 
             self.textedt.insert(
-                tk.END, message.get_type_text(), (tag, 'grayed'))
+                tk.END, message.get_type_text(), (tag, 'grayed', 'offset'))
 
             self.textedt.insert(
-                tk.END, ': ' + message.get_date() + ', ' + message.get_contact() + '\n', (tag, 'grayed'))
+                tk.END, ': ' + message.get_date() + ', ' + message.get_contact() + '\n',
+                (tag, 'grayed', 'offset'))
             self.textedt.insert(tk.END, '\n')
 
         self.textedt.config(state=tk.DISABLED)
@@ -626,6 +649,12 @@ class Application(tk.Frame):
                     f.write(' ' + message.get_date() + ', ')
                     f.write(message.get_contact() + ':\n')
                     f.write(message.get_text())
+                    if message.has_multi_addresses():
+                        f.write("\n > Mehrere Adressen:\n > ")
+                        f.write(
+                            "\n > ".join(
+                                ["%s (%s)" % (a[0], a[1])
+                                    for a in message.get_addresses()]))
                     if message.has_data():
                         data = message.get_data()
                         for d in data:
@@ -656,6 +685,4 @@ if __name__ == "__main__":
     # set window title
     root.wm_title("SMS Backup Reader")
     root.geometry("640x600")
-    #app.srcfile_edt.insert(0, 'sms_example.xml') #TODO remove
-    #app.srcfile_edt.insert(0, 'Beispielmms.xml') #TODO remove
     app.mainloop()
