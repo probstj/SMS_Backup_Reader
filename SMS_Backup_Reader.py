@@ -52,6 +52,77 @@ https://docs.python.org/3/library/xml.etree.elementtree.html#xmlparser-objects
 # - also need list of conversation partners? (or use keys of dict?)
 # - another list of all smss, sorted by date (or have a special entry 'all' in dict?)
 
+class Call:
+    def __init__(self, attrib):
+        """Creates a call data set. *attrib* is the attribute dict
+        returned by the xml reader.
+
+        """
+
+        # from here: https://synctech.com.au/sms-backup-restore/fields-in-xml-backup-files/
+        #    number - The phone number of the call.
+        #    duration - The duration of the call in seconds.
+        #    date - The Java date representation (including millisecond) of the time when the message was sent/received. Check out www.epochconverter.com for information on how to do the conversion from other languages to Java.
+        #    type - 1 = Incoming, 2 = Outgoing, 3 = Missed, 4 = Voicemail, 5 = Rejected, 6 = Refused List.
+        #    presentation - caller id presentation info. 1 = Allowed, 2 = Restricted, 3 = Unknown, 4 = Payphone.
+        #    readable_date - Optional field that has the date in a human readable format.
+        #    contact_name - Optional field that has the name of the contact.
+
+        self._address = attrib["number"]
+        self._duration = int(attrib["duration"])
+        self._date = attrib["date"]
+        self._ctype = int(attrib["type"])
+        self._readable_date = attrib.get(
+            "readable_date",
+            time.strftime(
+                    '%d.%m.%Y %H:%M:%S',
+                    time.localtime(float(self._date) / 1000)))
+        self._contact_name = attrib["contact_name"]
+
+        self.contact = self._contact_name
+        if self.contact == '(Unknown)':
+            self.contact = self._address
+
+    def get_type_text(self):
+        return [
+            "Eingehend", "Ausgehend", "Verpasst",
+            "Voicemail", "Abgelehnt", "Geblockt"][self._ctype - 1]
+
+    def is_received(self):
+        """incoming call"""
+        return self._ctype == 1
+
+    def is_sent(self):
+        """outgoing call"""
+        return self._ctype == 2
+
+    def get_contact(self):
+        return self.contact
+
+    def get_contact_with_number(self):
+        if self._contact_name == '(Unknown)':
+            return self.contact
+        else:
+            return "%s (%s)" % (self.contact, self._address)
+
+    def get_address(self):
+        return self._address
+
+    def get_date(self):
+        return self._readable_date
+
+    def get_text(self):
+        m, s = divmod(self._duration, 60)
+        return "Anruf am %s: %02imin %02is, %s, %s" % (
+                self.get_date(), m, s,
+                self.get_type_text(),  self.get_contact_with_number())
+
+    def has_data(self):
+        return False
+
+    def has_multi_addresses(self):
+        return False
+
 
 class Message:
     def __init__(self, attrib):
@@ -110,6 +181,12 @@ class Message:
 
     def get_contact(self):
         return self.contact
+
+    def get_contact_with_number(self):
+        if self._contact_name == '(Unknown)':
+            return self.contact
+        else:
+            return "%s (%s)" % (self.contact, self._address)
 
     def get_address(self):
         return self._address
@@ -304,9 +381,6 @@ class XML_Target:
             self._data[key].append(data)
             self._data['__all__'].append(data)
         elif tag == 'mms':
-            key = attrib["contact_name"]
-            if key == '(Unknown)':
-                key = attrib["address"]
             data = MMS(attrib)
             key = data.get_contact()
             if not key in self._data:
@@ -320,6 +394,13 @@ class XML_Target:
         elif tag == 'parts' or tag == 'addrs':
             if attrib:
                 print(tag, attrib, "should actually be empty")
+        elif tag == 'call':
+            data = Call(attrib)
+            key = data.get_contact()
+            if not key in self._data:
+                self._data[key] = []
+            self._data[key].append(data)
+            self._data['__all__'].append(data)
         else:
             # at least print the unprocessed tags:
             print(tag, attrib)
@@ -519,12 +600,11 @@ class Application(tk.Frame):
             "link", "<Leave>", self.hide_hand_cursor)
 
         if contact != '__all__':
-            first = self.reader.get_message_list(contact)[0]
-            if first._contact_name == '(Unknown)':
-                self.textedt.insert(tk.END, '%s\n\n' % (contact, ))
-            else:
-                self.textedt.insert(
-                    tk.END, '%s (%s)\n\n' % (contact, first._address))
+            self.textedt.insert(
+                tk.END,
+                '%s\n\n' % (
+                    self.reader.get_message_list(
+                            contact)[0].get_contact_with_number() ))
 
         #img = tk.PhotoImage(file="emoji.png").subsample(2)
         #img = ImageTk.PhotoImage(Image.open('emoji.png'))
@@ -596,12 +676,14 @@ class Application(tk.Frame):
                 self.textedt.insert(
                 tk.END, '\n', (tag, 'grayed',))
 
-            self.textedt.insert(
-                tk.END, message.get_type_text(), (tag, 'grayed', 'offset'))
+            if not isinstance(message, Call):
+                # calls already have these details in their text
+                self.textedt.insert(
+                    tk.END, message.get_type_text(), (tag, 'grayed', 'offset'))
 
-            self.textedt.insert(
-                tk.END, ': ' + message.get_date() + ', ' + message.get_contact() + '\n',
-                (tag, 'grayed', 'offset'))
+                self.textedt.insert(
+                    tk.END, ': %s, %s\n' % (message.get_date(), message.get_contact_with_number()),
+                    (tag, 'grayed', 'offset'))
             self.textedt.insert(tk.END, '\n')
 
         self.textedt.config(state=tk.DISABLED)
@@ -645,9 +727,11 @@ class Application(tk.Frame):
                 else:
                     contact = self.reader.get_contacts_list()[selection - 1]
                 for message in self.reader.get_message_list(contact):
-                    f.write(message.get_type_text())
-                    f.write(' ' + message.get_date() + ', ')
-                    f.write(message.get_contact() + ':\n')
+                    if not isinstance(message, Call):
+                        # calls already have these details in their text
+                        f.write(message.get_type_text())
+                        f.write(' ' + message.get_date() + ', ')
+                        f.write(message.get_contact_with_number() + ':\n')
                     f.write(message.get_text())
                     if message.has_multi_addresses():
                         f.write("\n > Mehrere Adressen:\n > ")
