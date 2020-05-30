@@ -16,32 +16,6 @@ try:
 except ModuleNotFoundError:
     ImageTk = False
 
-"""
-https://stackoverflow.com/questions/7693515/why-is-elementtree-raising-a-parseerror#7693834
-https://www.w3.org/TR/2008/REC-xml-20081126/#charsets
-https://en.wikipedia.org/wiki/GSM_03.38
-
-https://support.bandwidth.com/hc/en-us/articles/360010234793-What-is-SMS-Messaging-Encoding-and-Why-is-it-Important-
-https://en.wikipedia.org/wiki/Plane_(Unicode)#Basic_Multilingual_Plane
-
-https://github.com/danzek/sms-backup-and-restore-parser
-https://github.com/danzek/sms-backup-and-restore-parser/blob/master/cmd/sbrparser/main.go
-https://synctech.com.au/sms-backup-restore/view-or-edit-backup-files-on-computer/
-https://synctech.com.au/sms-backup-restore/fields-in-xml-backup-files/
-https://mattj.io/sms-backup-reader-2/main
-
-https://stackoverflow.com/questions/38147259/how-to-work-with-surrogate-pairs-in-python
-http://www.unicode.org/faq/utf_bom.html#utf16-3
-https://unicodebook.readthedocs.io/unicode_encodings.html#surrogates
-
-http://www.unicode.org/emoji/charts/index.html
-http://www.unicode.org/emoji/charts/full-emoji-list.html
-https://apps.timwhitlock.info/unicode/
-
-https://stackoverflow.com/questions/17287700/how-to-parse-a-xml-file-into-a-tree-in-python/17288001#17288001
-https://docs.python.org/3/library/xml.etree.elementtree.html#xmlparser-objects
-
-"""
 
 #plan:
 # - read file line by line - ok
@@ -537,6 +511,26 @@ class Application(tk.Frame):
     def insert_text_to_textedit(self, text, tag):
         """Adds text to tkinter Text. If 'text' contains unallowed signs,
         like emojis, replace them with replacement sign.
+
+        """
+        """
+        https://stackoverflow.com/questions/7693515/why-is-elementtree-raising-a-parseerror#7693834
+        https://www.w3.org/TR/2008/REC-xml-20081126/#charsets
+        https://en.wikipedia.org/wiki/GSM_03.38
+
+        https://support.bandwidth.com/hc/en-us/articles/360010234793-What-is-SMS-Messaging-Encoding-and-Why-is-it-Important-
+        https://en.wikipedia.org/wiki/Plane_(Unicode)#Basic_Multilingual_Plane
+
+        https://stackoverflow.com/questions/38147259/how-to-work-with-surrogate-pairs-in-python
+        http://www.unicode.org/faq/utf_bom.html#utf16-3
+        https://unicodebook.readthedocs.io/unicode_encodings.html#surrogates
+
+        http://www.unicode.org/emoji/charts/index.html
+        http://www.unicode.org/emoji/charts/full-emoji-list.html
+        https://apps.timwhitlock.info/unicode/
+
+        https://stackoverflow.com/questions/17287700/how-to-parse-a-xml-file-into-a-tree-in-python/17288001#17288001
+        https://docs.python.org/3/library/xml.etree.elementtree.html#xmlparser-objects
 
         """
         try:
