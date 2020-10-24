@@ -10,4 +10,4 @@ Optionally, if also PIL is installed, it shows MMS images in the app. These can 
 
 ---
 
-This was originally made as a quick project for a very special person, but turned out quite nice so I thought I'd share it with the world.
+This was originally made as a quick project for a friend, but turned out quite nice so I thought I'd share it with the world.
